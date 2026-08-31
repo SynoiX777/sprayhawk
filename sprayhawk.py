@@ -397,6 +397,10 @@ HYDRA_SERVICES = ["smb", "ldap", "ldap2", "rdp", "ssh", "ftp", "mssql", "winrm"]
 HYDRA_LINE_RE = re.compile(
     r"\[(?P<port>\d+)\]\[(?P<service>[\w-]+)\]\s+host:\s+(?P<host>\S+)\s+login:\s+(?P<login>\S+)\s+password:\s+(?P<password>\S+)"
 )
+# Verbose (-V) reji minde her cehd sitiri: [ATTEMPT] target X - login "u" - pass "p" - N of TOTAL ...
+HYDRA_ATTEMPT_RE = re.compile(r"\[ATTEMPT\].*?-\s*(\d+)\s+of\s+(\d+)")
+# Verbose olmadiqda umumi cehd sayi: [DATA] ... N login tries
+HYDRA_TOTAL_TRIES_RE = re.compile(r"(\d+)\s+login\s+tries")
 
 
 def run_hydra_brute_force(args):
@@ -447,6 +451,9 @@ def run_hydra_brute_force(args):
         if not line:
             continue
         match = HYDRA_LINE_RE.search(line)
+        attempt_match = HYDRA_ATTEMPT_RE.search(line)
+        total_match = HYDRA_TOTAL_TRIES_RE.search(line)
+
         if match:
             login = match.group("login")
             password = match.group("password")
@@ -454,11 +461,22 @@ def run_hydra_brute_force(args):
             valid_creds.append((login, password, service.upper()))
             stats["valid"] += 1
             console.print(f"[bold green]  TAPILDI: {login}:{password} ({service})[/bold green]")
-        elif "attempt" in line.lower() or "login try" in line.lower():
-            stats["attempts"] += 1
+        elif attempt_match:
+            # Verbose (-V) rejimi: her setirde N of TOTAL gorunur, cari sayi gotururuk
+            stats["attempts"] = int(attempt_match.group(1))
+            console.print(f"[dim]{line}[/dim]")
+        elif total_match and stats["attempts"] == 0:
+            # Verbose olmadiqda: ilk defe umumi cehd sayini [DATA] setirinden oxu,
+            # sonda hamisi tamamlandigi ucun total-a beraber olur
+            stats["total"] = int(total_match.group(1))
             console.print(f"[dim]{line}[/dim]")
         else:
             console.print(f"[dim]{line}[/dim]")
+
+    # Hydra -V olmadan isleyibse, "N of N" gormemisik - butun cehdler tamamlandigi
+    # ucun (proses bitib) attempts = total qeyd edirik.
+    if stats["attempts"] == 0 and stats["total"] > 0:
+        stats["attempts"] = stats["total"]
 
     process.wait()
     elapsed = time.time() - start_time
